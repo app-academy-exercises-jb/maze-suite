@@ -2,10 +2,10 @@ require 'byebug'
 require_relative 'trie/trie.rb'
 
 class Maze_Maker
-    def self.draw_maze(x, y)
-        raise "params must be ints" unless x.kind_of?(Integer) && y.kind_of?(Integer)
+    def self.draw_maze(x)
+        raise "params must be ints" unless x.kind_of?(Integer)
 
-        @x, @y = x, y
+        @x, @y = x, x
 
         name_edges
         make_grid(@x, @y)
@@ -57,8 +57,6 @@ class Maze_Maker
         @stack = [] #we will only use push and pop for FIFO behaviour
         @discovered = Hash.new { |h,k| h[k] = false }
         @parents = {}
-        @entry_time = {}
-        @time = 1
 
         #start = [rand(1..@x-1), rand(1..@y-1)] #this is a random central start
         start = @edges[rand(@edges.length)] #this is a random edge start
@@ -88,9 +86,6 @@ class Maze_Maker
                             !outside_edge?(the_one_after) && 
                             the_one_after.value == "*"
 
-                            @time += 1
-                            @entry_time[@time] = the_one_after
-
                             child.value = " "
                             the_one_after.value = " "
                             @discovered[the_one_after] = true
@@ -104,7 +99,6 @@ class Maze_Maker
         end
         # debugger
         @parents.keys[-1].value = "E"
-        #@entry_time[@entry_time.length + 1].value = "E"
     end
 
     private_class_method def self.direction(node_1, node_2)
