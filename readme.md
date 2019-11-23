@@ -1,27 +1,13 @@
-To see the maze reader, maker, and solver in action, simply run 'ruby watch_em_go.rb'
+To see the maze suite in action, simply run 'ruby watch_em_go.rb'
 
-The use of each is as follows. Care must be taken as input sanitation has not been properly processed.
+As per the project's instructions, a Maze may be initialized with a string, which will be assumed to be a relative path to a .txt file on disk. However, Maze can also be initialized with a pair of numbers (minimum of 5 each), which will construct a random maze of that grid size. Usage is as follows:
 
-Maze_Reader expects a rectangular array of characters, each element of which represents a line in a text maze, and expects to be instantiated. Eg:
+    maze = Maze.new('mazes/maze_2.txt')
+    maze = Maze.new(15, 15)
 
-    maze = Maze_Reader.new(File.read('mazes/maze_2.txt').split("\n"))
+Maze objects have an ease of life #print_maze method which will show you the parsed maze. At this point you can choose to invoke the method #solve_maze, which will automatically print the solved maze. Eg:
 
-Maze_Reader objects have an ease of life #print_maze method.
-
-Maze_Solver is invoked through its class method ::solve_maze. This method expects a Maze_Reader object as its argument. Eg:
-
-    Maze_Solver.solve_maze(maze)
-
-Finally, Maze_Maker is invoked through its class method ::draw_maze. This method expects an integer, which it will understand to be the size of the square maze it will make. Eg:
-
-    Maze_Maker.draw_maze(11)
-
-You can use them together like this:
-
-    maze = Maze_Reader.new(Maze_Maker.draw_maze(11))
-    Maze_Solver.solve_maze(maze)
-    maze.print_maze
-
+    maze.solve_maze
 
 
 The Maze reader takes in a rectangular grid of the following characters: " ", "\*", "E", and "S". Setting the head at 'S', it creates an undirected graph in which the connected nodes are connoted by the adjacency of characters in the grid. Specifically, " " is understood as a walkable tile, and is connected to any other adjacent, walkable tile; "\*" is understood as a wall or barrier, and adjacent walkable tiles do not connect to these. Thus, the generated graph is a tree of legal movement choices in the maze.

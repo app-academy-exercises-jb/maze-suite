@@ -1,162 +1,202 @@
+# frozen_string_literal: true
 require 'byebug'
 require_relative 'trie/trie.rb'
+require_relative 'maker.rb'
+require_relative 'solver.rb'
 
-class Maze_Reader
-    attr_reader :maze
-    #the objective of this class is to present Maze_Solver with something that it can cleanly parse. that is, a Maze object, composed of positions, one of which is the start and another the end, passable or not, each of which has 2, 3, or 4 connected positions (corner, edge, or center). Ergo, this maze has no diagonal movement.
-    
-    #We can represent this maze as an undirected, unweighted graph using our pre-existing Trie data structure with some changes.
-    def initialize(object)
-        #we expect object to be an array, all of whose elements are the same length
-        #for the sake of argument, we will consider the following symbols: 
-        #" " will be a space we can move into
-        #"*" will be an obstacle -- a space we cannot move into
-        #"E" and "S" -- there must be exactly one of each. we will initialize @end and @start variables at their positions
-        
-        #raise "error" if any of the above are false
+class Maze
+  attr_reader :maze
 
-        @literal = object
-        @x = @literal.length - 1
-        @y = @literal[0].length - 1
-        define_positions
+  def initialize(*args)
+    # as per the instructions, a Maze may be initialized with a string, which will be assumed to be a relative path to a .txt file on disk.
+    # however, Maze can also be initialized with a number(min 5), which will construct a random maze of that size
 
-        #create an array of arrays of nodes, corresponding to the maze's grid size
-        #when we find S and E, assign head and terminator, respectively
-        @positions = Array.new(object.length) { |i| 
-            Array.new(object[0].length) { |i2| 
-                new_node = Node.new(object[i][i2])
-                unless /[SE *]/.match?(object[i][i2])
-                    raise "fatal"
-                end
-                case object[i][i2]
-                when "S"
-                    @head = new_node
-                when "E"
-                    new_node.terminator = true
-                end
-                new_node
-            }
-        }
+    case args.length
+    when 1
+      #We assume we have a relative path to a file, expecting to find a legal maze
+      raise TypeError.new("argument must be a string") unless args[0].is_a?(String)
+      raise "the file #{args[0]} does not exist" unless File.exist?(args[0])
 
-        #go through all of our nodes, and decide who is going to be neighbors
-        #neighbors are grid-adjacent, walkable tiles
-        @positions.each_with_index { |row, idx|
-            row.each_with_index { |position, idx2|
-                case position_type(idx, idx2)
-                when :edge
-                    edge(position, idx, idx2)
-                when :corner
-                    corner(position, idx, idx2)
-                when :central
-                    central(position, idx, idx2)
-                else
-                    raise "fatal"
-                end
-            }
-        }
+      maze = File.read(args[0]).split("\n")
+      unless maze.flatten.all? { |c| /[SE *]/.match?(c) }
+        raise "invalid characters found"
+      end
+      unless maze.all? { |row| row.length == maze[0].length }
+        raise "Mazes currently must be rectangular"
+      end
 
-        #this trie object represents the maze as a series of choices to be made, starting from the start position.
-        @maze = Trie.new(@head)
+
+      prc = Proc.new { |_i, _i2| 
+        node = Node.new(maze[_i][_i2])
+        case node.value
+        when 'S'
+          @head = node
+        when 'E'
+          node.terminator = true
+        end
+        node
+      }
+
+      @x = maze.length - 1
+      @y = maze[0].length - 1
+
+
+
+      make_grid(maze.length, maze[0].length, &prc)
+      connect_grid
+
+    when 2
+      unless args.all? { |a| a.is_a?(Integer) && a >= 5 }
+        raise 'Both args must be integers greater than 4'
+      end
+
+      random_maze(args[0], args[1])
     end
 
-    #Maze Helper Methods
-    def print_maze
-        @positions.each { |row| 
-            line = ""
-            row.each { |column|
-                line += column.value
-            }
-            p line
-        }
-        nil
+    @maze = Trie.new(@head)
+    #We set self.maze to a trie which may be traversed by ::solve_maze
+  end
+
+  def print_maze
+    @grid.each do |row|
+      line = ''
+      row.each do |column|
+        line += column.value
+      end
+      p line
     end
+    nil
+  end
 
-
-    #Initialize Helper Methods
-    def define_positions
-        @corners = [[0,0],[@x,0],[0,@y],[@x,@y]]
-        @edges = []
-        (1..@y-1).each { |i| @edges << [0,i] }
-        (1..@y-1).each { |i| @edges << [@x,i] }
-        (1..@x-1).each { |i| @edges << [i,0] }
-        (1..@x-1).each { |i| @edges << [i,@y] }
-    end
-
-    def position_type(num_1, num_2)
-        #returns :edge, :corner, or :other
-        if @corners.include?([num_1, num_2])
-            return :corner
-        elsif @edges.include?([num_1, num_2])
-            return :edge
-        elsif (num_1 > @x || num_2 > @y)
-            return :none
+  def make_grid(x, y, &prc)
+    define_positions
+    @coordinates = {}
+    @grid = Array.new(x) do |_i|
+      Array.new(y) do |_i2|
+        if prc
+          node = prc.call(_i, _i2)
         else
-            return :central
+          node = Node.new('*')
         end
+        @coordinates[node] = [_i, _i2]
+        node
+      end
+    end # we create an x by y sized grid of Nodes
+  end
+  private :make_grid
+
+  def connect_grid(&prc)
+    @grid.each_with_index do |row, idx|
+      row.each_with_index do |position, idx2|
+        case position_type(idx, idx2)
+        when :edge
+          edge(position, idx, idx2)
+        when :corner
+          corner(position, idx, idx2)
+        when :central
+          central(position, idx, idx2)
+        else
+          raise 'fatal'
+        end
+      end
+    end # and connect them in such a fashion as to connote a rectangular planar graph
+  end
+  private :connect_grid
+
+  def define_positions
+    @corners = [[0, 0], [@x, 0], [0, @y], [@x, @y]]
+    @edges = [] # discludes corners
+    (1..@y - 1).each { |i| @edges << [0, i] }
+    (1..@y - 1).each { |i| @edges << [@x, i] }
+    (1..@x - 1).each { |i| @edges << [i, 0] }
+    (1..@x - 1).each { |i| @edges << [i, @y] }
+  end
+  protected :define_positions
+
+  def position_type(num_1, num_2)
+    # returns :edge, :corner, or :other
+    if @corners.include?([num_1, num_2])
+      :corner
+    elsif @edges.include?([num_1, num_2])
+      :edge
+    elsif num_1 > @x || num_2 > @y || num_1 < 0 || num_2 < 0
+      :none
+    else
+      :central
+    end
+  end
+  private :position_type
+
+  def outside_edge?(node)
+    @edges.any?(@coordinates[node]) ||
+    @corners.any?(@coordinates[node])
+  end
+  private :outside_edge?
+
+  # the following code is very smelly, pls fix?
+  def corner(position, idx, idx2)
+    positions = []
+    case idx
+    when 0
+      if idx2 == 0
+        positions << @grid[idx][idx2 + 1]
+        positions << @grid[idx + 1][idx2]
+      else
+        positions << @grid[idx][idx2 - 1]
+        positions << @grid[idx + 1][idx2]
+      end
+    when @y
+      if idx2 == 0
+        positions << @grid[idx][idx2 + 1]
+        positions << @grid[idx - 1][idx2]
+      else
+        positions << @grid[idx][idx2 - 1]
+        positions << @grid[idx - 1][idx2]
+      end
+    end
+    positions.each { |node| position.connect(node) }
+  end
+  private :corner
+
+  def edge(position, idx, idx2)
+    positions = []
+
+    case idx
+    when 0 # && position_type(idx, idx2) != :corner
+      positions << @grid[idx][idx2 - 1]
+      positions << @grid[idx][idx2 + 1]
+      positions << @grid[idx + 1][idx2]
+    when @x # && position_type(idx, idx2) != :corner
+      positions << @grid[idx][idx2 - 1]
+      positions << @grid[idx][idx2 + 1]
+      positions << @grid[idx - 1][idx2]
     end
 
-    #the following code is very smelly, pls fix?
-    def corner(position, idx, idx2)
-        positions = []
-        case idx
-        when 0
-            if idx2 == 0
-                positions << @positions[idx][idx2+1] if @positions[idx][idx2+1].value != "*"
-                positions << @positions[idx+1][idx2] if @positions[idx+1][idx2].value != "*"
-            else
-                positions << @positions[idx][idx2-1] if @positions[idx][idx2-1].value != "*"
-                positions << @positions[idx+1][idx2] if @positions[idx+1][idx2].value != "*"
-            end
-        when @y
-            if idx2 == 0
-                positions << @positions[idx][idx2+1] if @positions[idx][idx2+1].value != "*"
-                positions << @positions[idx-1][idx2] if @positions[idx-1][idx2].value != "*"
-            else
-                positions << @positions[idx][idx2-1] if @positions[idx][idx2-1].value != "*"
-                positions << @positions[idx-1][idx2] if @positions[idx-1][idx2].value != "*"
-            end
-        end
-        position.give_children(positions)
+    case idx2
+    when 0 # && position_type(idx, idx2) != :corner
+      positions << @grid[idx][idx2 + 1]
+      positions << @grid[idx + 1][idx2]
+      positions << @grid[idx - 1][idx2]
+    when @y # && position_type(idx, idx2) != :corner
+      positions << @grid[idx][idx2 - 1]
+      positions << @grid[idx + 1][idx2]
+      positions << @grid[idx - 1][idx2]
     end
 
-    def edge(position, idx, idx2)
-        positions = []
-        
-        case idx
-        when 0 && position_type(idx, idx2) != :corner
-            positions << @positions[idx][idx2-1] if @positions[idx][idx2-1].value != "*"
-            positions << @positions[idx][idx2+1] if @positions[idx][idx2+1].value != "*"
-            positions << @positions[idx+1][idx2] if @positions[idx+1][idx2].value != "*"
-        when @y && position_type(idx, idx2) != :corner
-            positions << @positions[idx][idx2-1] if @positions[idx][idx2-1].value != "*"
-            positions << @positions[idx][idx2+1] if @positions[idx][idx2+1].value != "*"
-            positions << @positions[idx-1][idx2] if @positions[idx-1][idx2].value != "*"
-        end
-        
-        case idx2
-        when 0 && position_type(idx, idx2) != :corner
-            positions << @positions[idx][idx2+1] if @positions[idx][idx2+1].value != "*"
-            positions << @positions[idx+1][idx2] if @positions[idx+1][idx2].value != "*"
-            positions << @positions[idx-1][idx2] if @positions[idx-1][idx2].value != "*"
-        when @y && position_type(idx, idx2) != :corner
-            positions << @positions[idx][idx2-1] if @positions[idx][idx2-1].value != "*"
-            positions << @positions[idx+1][idx2] if @positions[idx+1][idx2].value != "*"
-            positions << @positions[idx-1][idx2] if @positions[idx-1][idx2].value != "*"
-        end
-        
-        position.give_children(positions)
-    end
+    positions.each { |node| position.connect(node) }
+  end
+  private :edge
 
-    def central(position, idx, idx2)
-        positions = []
-        type = position_type(idx, idx2)
-        unless type == :corner || type == :edge 
-            positions << @positions[idx-1][idx2] if @positions[idx-1][idx2].value != "*"
-            positions << @positions[idx][idx2-1] if @positions[idx][idx2-1].value != "*"
-            positions << @positions[idx][idx2+1] if @positions[idx][idx2+1].value != "*"
-            positions << @positions[idx+1][idx2] if @positions[idx+1][idx2].value != "*"
-        end
-        position.give_children(positions)
+  def central(position, idx, idx2)
+    positions = []
+    type = position_type(idx, idx2)
+    unless type == :corner || type == :edge
+      positions << @grid[idx - 1][idx2]
+      positions << @grid[idx][idx2 - 1]
+      positions << @grid[idx][idx2 + 1]
+      positions << @grid[idx + 1][idx2]
     end
-
+    positions.each { |node| position.connect(node) }
+  end
+  private :central
 end
